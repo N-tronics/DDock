@@ -1,9 +1,10 @@
 FROM ubuntu:latest
 
-COPY dist/daemon /bin/ddock-daemon
+ENV DDD_CONF /etc/ddd.conf.json
+
+# The dist/ has all the compiled programs
+COPY dist/ /bin/
 COPY ddd.conf.json /etc
 
-RUN touch ~/.bash_path
-RUN echo "\n. ~/.bash_path" >> ~/.bashrc
-
+# Run the ddock daemon on startup
 CMD ["./bin/ddock-daemon"]
