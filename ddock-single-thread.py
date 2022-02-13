@@ -15,6 +15,8 @@ class DDockDaemon:
     # Helper class to interface with docker
     def __init__(self):
         self.dockerClient = docker.from_env()
+        self.image = 'ddock-sys'
+        self.tag = 'v1-8'
 
     def startContainer(self, user: str):
         """
@@ -27,7 +29,7 @@ class DDockDaemon:
         if user in [cont.name for cont in self.dockerClient.containers.list(all=True)]:
             container = self.dockerClient.containers.get(user)
         else:
-            container = self.dockerClient.containers.create('ddock-sys:v1-7', detach=True, name=user)
+            container = self.dockerClient.containers.create(f'{self.image}:{self.tag}', detach=True, name=user)
 
         # Start the container and and wait for it to fully start
         container.start()

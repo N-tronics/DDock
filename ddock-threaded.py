@@ -1,98 +1,83 @@
 import os
 import docker
 import discord
-import threading as thread
+import threading
 import asyncio
+import requests as req
+import time
+import dotenv
 from discord.ext import commands
-from dotenv import load_dotenv
 
-load_dotenv()
-DDOCK_TOKEN = os.getenv('DDOCK_TOKEN')
-
+# Create clients and set constants
+dotenv.load_dotenv()
 ddock = commands.Bot(command_prefix='$ ')
-dockClient = docker.from_env()
-
-running_handlers = {}
-
-
-class Docker:
-    @staticmethod
-    def startContainer(user):
-        existingContainers = dockClient.containers.list(all=True)
-        if user in [cont.name for cont in existingContainers]:
-            container = dockClient.containers.get(user)
-        else:
-            container = dockClient.containers.create(
-                'ubuntu:latest', 'sleep infinity', detach=True, name=user)
-        if container.status != 'running':
-            container.start()
-
-        return container
-
-    @staticmethod
-    def containerExec(container, cmd):
-        res = container.exec_run(f'bash -c "source /root/.bashrc; cd $PWD; {cmd}"')
-        return res[0], res[1].decode('utf-8')
-
-    @staticmethod
-    def containerCd(container, dir):
-        result = Docker.containerExec(container, f'cd {dir}; pwd')
-        if result[0]: return result
-
-        Docker.containerExec(container, f'echo \'export PWD={result[1]}\' > /root/.bashrc')
-        return (result[0], result[1])
+docker_client = docker.from_env()
+DDOCK_TOKEN = os.getenv('DDOCK_TOKEN')
+IMAGE = 'ddock-sys'
+TAG = 'v2-0'
 
 
-class ReqHandler(thread.Thread):
-    def __init__(self):
-        super().__init__(daemon=True)
-        self.loop = asyncio.new_event_loop()
-
-    def run(self):
-        asyncio.set_event_loop(self.loop)
-        self.loop.run_forever()
-
-
-async def send_reply(code, res, msg):
+def start_container(user: str):
+    # Get the container object. If the container doesn't exist, create a new one
     try:
-        await msg.channel.send(f'```Exit Code: {code}``` ```{res}```', reference=msg)
+        container = docker_client.containers.get(user)
+    except docker.errors.NotFound:
+        container = docker_client.containers.create(f'{IMAGE}:{TAG}', detach=True, name=user)
+    container.start()
+    # Wait till the container starts
+    while not container.attrs['State']['Running']:
+        container.reload()
+        time.sleep(0.1)
+
+    return container
+
+
+async def send_result(msg, res):
+    try:
+        await msg.channel.send(f'```Exit Code: {res["exitcode"]}``````{res["result"]}```', reference=msg)
     except discord.errors.HTTPException:
-        await msg.channel.send(f'Could not send output log.```Exit Code: {code}```', reference=msg)
+        await msg.channel.send(f'Could not send output log.```Exit Code: {res["exitcode"]}```', reference=msg)
 
-async def request_handler(msg, cmd, parent_loop):
-    print('processing request')
-    container = Docker.startContainer(msg.author.name)
 
-    if cmd.split()[0] == 'cd':
-        code, res = Docker.containerCd(container, ' '.join(cmd.split()[1:]))
+def init_thread(msg, parent_loop):
+    # Start container and try to connect to the API for 2 seconds.
+    container = start_container(msg.author.name)
+    for _ in range(20):
+        try:
+            res = req.get(
+                f'http://{container.attrs["NetworkSettings"]["IPAddress"]}:1000',
+                data={'cmd': msg.content[len(ddock.command_prefix):]}
+            ).json()
+            if len(res['result']) == 0: res['result'] = ' '
+            break
+        except req.exceptions.ConnectionError:
+            pass
+        time.sleep(0.1)
     else:
-        code, res = Docker.containerExec(container, cmd)
-    container.stop()
-
-    print(f'done with req: {res}')
-    asyncio.run_coroutine_threadsafe(send_reply(code, res, msg), parent_loop)
+        res = {
+            'exitcode': 1,
+            'result': 'Could not connect to container'
+        }
+        container.stop()
+    # Send the message from a coroutine running in the parent loop
+    asyncio.run_coroutine_threadsafe(send_result(msg, res), parent_loop)
 
 
 @ddock.event
 async def on_ready():
-    print(f'{ddock.user.name} has connected to Discord!')
+    print(f'{ddock.user.name} has connect to Discord!')
+
 
 @ddock.event
 async def on_message(msg):
-    if msg.author == ddock.user:
+    # If the author of the message is the bot or the message doesn't start with the command prefix, return
+    if msg.author == ddock.user or not msg.content.startswith(ddock.command_prefix):
         return
-    print(f'parent: {thread.get_ident()}')
 
-    if not msg.content.startswith(ddock.command_prefix): return
-    cmd = msg.content[len(ddock.command_prefix):].replace('"', '\\"')
-    print(cmd)
+    # Start a new thread to manage the execution of the command. Pass the main event loop as discord messages can only be sent from the main loop
+    thread = threading.Thread(target=init_thread, args=(msg, asyncio.get_event_loop()))
+    thread.start()
 
-    global running_handlers
 
-    if msg.author.name not in running_handlers:
-        running_handlers[msg.author.name] = ReqHandler()
-        running_handlers[msg.author.name].start()
-    asyncio.run_coroutine_threadsafe(request_handler(msg, cmd, asyncio.get_event_loop()), running_handlers[msg.author.name].loop)
-    print(thread.active_count())
-
-ddock.run(DDOCK_TOKEN)
+if __name__ == '__main__':
+    ddock.run(DDOCK_TOKEN)

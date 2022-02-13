@@ -3,7 +3,6 @@ from flask import Flask, request
 from json import dump, load
 from socket import gethostbyname, gethostname
 from subprocess import run, DEVNULL, PIPE, STDOUT
-from sys import exit
 from os import getenv
 
 DDD_CONF = getenv('DDD_CONF', '/etc/ddd.conf.json')
@@ -16,7 +15,14 @@ def exec():
         config = load(f)
     # Check if the stored CWD is valid
     if run(f"cd {config['Cwd']}", shell=True, stdout=DEVNULL, stderr=DEVNULL, executable='bash', cwd='/').returncode:
-        exit(1)
+        config['Cwd'] = '/'
+        with open(DDD_CONF, 'w') as f:
+            dump(config, f, indent=4)
+        return {
+            'exitcode': 1,
+            'result': 'Stored CWD is not a valid directory. Defaulting to /'
+        }
+
     # Parse the environment variables
     envs = {k:(getenv(k, '') + v['Value'] if config['Env'][k]['Concat'] else v['Value']) for k, v in tuple(config['Env'].items())}
 
@@ -31,7 +37,7 @@ def exec():
     output = run(cmd, shell=True, text=True, stdout=PIPE, stderr=STDOUT, executable='bash', env=envs, cwd=config['Cwd'])
     res = {'exitcode': output.returncode, 'result': output.stdout}
     # If the command was a change directory and it was a success, store the directory in the config file
-    if is_cd and not output.returncode:
+    if is_cd and output.returncode == 0:
         config['Cwd'] = output.stdout[:-1]
         with open(DDD_CONF, 'w') as f:
             dump(config, f, indent=4)

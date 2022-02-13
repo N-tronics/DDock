@@ -1,6 +1,7 @@
 FROM ubuntu:latest
 
-ENV DDD_CONF /etc/ddd.conf.json
+ENV DDD_CONF=/etc/ddd.conf.json
+ENV HOME=/root
 
 # The dist/ has all the compiled programs
 COPY dist/ /bin/
