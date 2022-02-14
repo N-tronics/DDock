@@ -1,11 +1,11 @@
 FROM ubuntu:latest
 
-ENV DDD_CONF=/etc/ddd.conf.json
+ENV DDS_CONF=/etc/dds.conf.json
 ENV HOME=/root
 
 # The dist/ has all the compiled programs
 COPY dist/ /bin/
-COPY ddd.conf.json /etc
+COPY dds.conf.json /etc
 
 # Run the ddock daemon on startup
 CMD ["./bin/ddock-daemon"]

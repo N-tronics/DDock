@@ -14,7 +14,7 @@ ddock = commands.Bot(command_prefix='$ ')
 docker_client = docker.from_env()
 DDOCK_TOKEN = os.getenv('DDOCK_TOKEN')
 IMAGE = 'ddock-sys'
-TAG = 'v2-0'
+TAG = 'v2-1'
 
 
 def start_container(user: str):
